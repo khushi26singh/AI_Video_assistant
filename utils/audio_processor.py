@@ -1,6 +1,7 @@
 import os
 import re
 import shutil
+from urllib.parse import parse_qs, urlparse
 
 import yt_dlp
 from pydub import AudioSegment
@@ -14,6 +15,50 @@ def sanitize_filename(name: str) -> str:
     cleaned = cleaned.replace('：', '_').replace(':', '_')
     cleaned = cleaned.strip().strip('.')
     return cleaned or 'audio'
+
+
+def normalize_youtube_url(source: str) -> str:
+    """Return a clean YouTube URL from raw/markdown/corrupted input."""
+    raw = (source or "").strip()
+    if not raw:
+        return raw
+
+    # Extract explicit markdown link target: [text](url)
+    md_match = re.search(r"\[[^\]]+\]\((https?://[^)\s]+)\)", raw)
+    if md_match:
+        raw = md_match.group(1)
+
+    # If the full URL is embedded in text, grab it.
+    url_match = re.search(r"https?://\S+", raw)
+    if url_match:
+        raw = url_match.group(0)
+
+    # Trim punctuation commonly attached during copy/paste.
+    raw = raw.strip("<>()[]{}\"'.,;\n\r\t ")
+
+    # Repair malformed host like 'www.youtube.comhttps'.
+    raw = re.sub(r"youtube\.comhttps", "youtube.com", raw, flags=re.IGNORECASE)
+
+    # Standardize short/long youtube URLs when possible.
+    parsed = urlparse(raw)
+    host = parsed.netloc.lower()
+
+    if host in {"youtu.be"}:
+        video_id = parsed.path.strip("/")
+        if video_id:
+            return f"https://www.youtube.com/watch?v={video_id}"
+
+    if "youtube.com" in host:
+        query = parse_qs(parsed.query)
+        video_id = query.get("v", [None])[0]
+        if video_id:
+            return f"https://www.youtube.com/watch?v={video_id}"
+        if parsed.path.startswith("/shorts/"):
+            short_id = parsed.path.split("/shorts/", 1)[1].split("/", 1)[0]
+            if short_id:
+                return f"https://www.youtube.com/watch?v={short_id}"
+
+    return raw
 
 
 def get_ffmpeg_bin_dir() -> str | None:
@@ -75,6 +120,7 @@ ensure_ffmpeg_available()
 
 
 def download_youtube_audio(url :str) ->str:
+    url = normalize_youtube_url(url)
     output_path = os.path.join(DOWNLOAD_DIR, "%(title)s.%(ext)s")
     ffmpeg_dir = get_ffmpeg_bin_dir()
     ydl_opts = {
