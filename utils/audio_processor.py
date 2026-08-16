@@ -1,12 +1,82 @@
+import os
+import re
+import shutil
+
 import yt_dlp
 from pydub import AudioSegment
-import os
 
 DOWNLOAD_DIR = 'downloades'
 os.makedirs(DOWNLOAD_DIR,exist_ok = True)
 
+
+def sanitize_filename(name: str) -> str:
+    cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', name)
+    cleaned = cleaned.replace('：', '_').replace(':', '_')
+    cleaned = cleaned.strip().strip('.')
+    return cleaned or 'audio'
+
+
+def get_ffmpeg_bin_dir() -> str | None:
+    candidates = [
+        os.environ.get("FFMPEG_BIN"),
+        os.environ.get("FFMPEG_PATH"),
+        os.path.join(
+            os.environ.get("LOCALAPPDATA", ""),
+            "Microsoft",
+            "WinGet",
+            "Packages",
+            "Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe",
+            "ffmpeg-9.0-full_build",
+            "bin",
+        ),
+        r"C:\Users\Khushi Singh\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-9.0-full_build\bin",
+        r"C:\ffmpeg\bin",
+        r"C:\Program Files\ffmpeg\bin",
+        r"C:\Program Files (x86)\ffmpeg\bin",
+    ]
+
+    for path in candidates:
+        if not path:
+            continue
+        if os.path.isdir(path) and os.path.exists(os.path.join(path, "ffmpeg.exe")):
+            return path
+
+    return None
+
+
+def ensure_ffmpeg_available() -> str | None:
+    """Ensure ffmpeg is visible to subprocess calls used by Whisper and pydub."""
+    ffmpeg_dir = get_ffmpeg_bin_dir()
+    if not ffmpeg_dir:
+        return None
+
+    ffmpeg_dir = os.path.normpath(ffmpeg_dir)
+    ffmpeg_exe = os.path.join(ffmpeg_dir, "ffmpeg.exe")
+    ffprobe_exe = os.path.join(ffmpeg_dir, "ffprobe.exe")
+
+    os.environ["FFMPEG_BIN"] = ffmpeg_dir
+    os.environ["FFMPEG_PATH"] = ffmpeg_dir
+
+    path_entries = os.environ.get("PATH", "").split(os.pathsep)
+    if ffmpeg_dir not in path_entries:
+        os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
+
+    if os.path.exists(ffmpeg_exe):
+        shutil.which("ffmpeg")
+        AudioSegment.converter = ffmpeg_exe
+        AudioSegment.ffmpeg = ffmpeg_exe
+    if os.path.exists(ffprobe_exe):
+        AudioSegment.ffprobe = ffprobe_exe
+
+    return ffmpeg_dir
+
+
+ensure_ffmpeg_available()
+
+
 def download_youtube_audio(url :str) ->str:
     output_path = os.path.join(DOWNLOAD_DIR, "%(title)s.%(ext)s")
+    ffmpeg_dir = get_ffmpeg_bin_dir()
     ydl_opts = {
         "format": "bestaudio/best",
         "outtmpl": output_path,
@@ -18,11 +88,39 @@ def download_youtube_audio(url :str) ->str:
             }
         ],
         "quiet": True,
+        "noplaylist": True,
+        "extractor_args": {"youtube": {"player_client": ["web", "android"]}},
     }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-        filename = ydl.prepare_filename(info).replace(".webm", ".wav").replace(".m4a", ".wav")
-    return filename
+    if ffmpeg_dir:
+        ydl_opts["ffmpeg_location"] = ffmpeg_dir
+        ydl_opts["ffprobe_location"] = ffmpeg_dir
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            title = sanitize_filename((info or {}).get("title") or "audio")
+            filename = ydl.prepare_filename(info).replace(".webm", ".wav").replace(".m4a", ".wav")
+            if os.path.exists(filename):
+                return filename
+
+            wav_candidates = [
+                os.path.join(DOWNLOAD_DIR, f"{title}.wav"),
+                os.path.join(DOWNLOAD_DIR, f"{title}_converted.wav"),
+                os.path.splitext(filename)[0] + ".wav",
+            ]
+            for candidate in wav_candidates:
+                if os.path.exists(candidate):
+                    return candidate
+
+        raise FileNotFoundError(
+            f"YouTube audio download did not create a file for: {url}. "
+            "This usually means the video is private, blocked, or YouTube rejected the request."
+        )
+    except yt_dlp.utils.DownloadError as exc:
+        raise RuntimeError(
+            f"Unable to download video data from YouTube: {exc}. "
+            "The video may be restricted, private, or blocked for this environment."
+        ) from exc
 
 
 
@@ -52,16 +150,25 @@ def chunk_audio(wav_path : str , chunk_minutes : int = 10) -> list:
     return chunks
 
 def process_input(source: str) -> list:
-    if source.startswith("http://") or source.startswith("https://"):
-        print("Detected YouTube URL. Downloading audio...")
-        wav_path = download_youtube_audio(source)
-    else:
-        print("Detected local file. Converting to WAV...")
-        wav_path = convert_to_wav(source)
+    try:
+        if source.startswith("http://") or source.startswith("https://"):
+            print("Detected YouTube URL. Downloading audio...")
+            wav_path = download_youtube_audio(source)
+        else:
+            print("Detected local file. Converting to WAV...")
+            wav_path = convert_to_wav(source)
 
-    print("Chunking audio...")
-    chunks = chunk_audio(wav_path)
-    print(f"Audio ready — {len(chunks)} chunk(s) created.")
-    return chunks
+        if not os.path.exists(wav_path):
+            raise FileNotFoundError(f"Audio file was not created: {wav_path}")
+
+        print("Chunking audio...")
+        chunks = chunk_audio(wav_path)
+        print(f"Audio ready — {len(chunks)} chunk(s) created.")
+        return chunks
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(
+            f"Input file not found or download failed: {source}. "
+            "Please verify the video URL or use a local audio/video file."
+        ) from exc
 
 

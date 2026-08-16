@@ -1,7 +1,10 @@
-import whisper
 import os
+
 import requests
+import whisper
 from pydub import AudioSegment
+
+from utils.audio_processor import ensure_ffmpeg_available
 
 # Sarvam's sync STT-translate API rejects audio longer than 30s.
 # We slice each chunk into 25s pieces (with a 5s safety margin) before sending.
@@ -20,13 +23,15 @@ _model = None
 
 def load_model():
 
-    global _model  
+    global _model
 
-    if _model is None: 
+    ensure_ffmpeg_available()
+
+    if _model is None:
         print(f"Loading Whisper model: {WHISPER_MODEL} ...")
-        _model = whisper.load_model(WHISPER_MODEL) 
+        _model = whisper.load_model(WHISPER_MODEL)
         print("Whisper model loaded.")
-    return _model 
+    return _model
 
 
 def transcribe_chunk_whisper(chunk_path: str) -> str:
