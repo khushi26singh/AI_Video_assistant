@@ -1,5 +1,7 @@
 import streamlit as st
 import time
+import os
+import tempfile
 from dotenv import load_dotenv
 from utils.audio_processor import process_input
 from core.transcriber import transcribe_all
@@ -337,6 +339,11 @@ with st.sidebar:
 
     st.markdown('<span class="badge badge-purple">Input</span>', unsafe_allow_html=True)
     source = st.text_input("YouTube URL or File Path", placeholder="https://youtube.com/watch?v=... or /path/to/file.mp4")
+    uploaded_file = st.file_uploader(
+        "Or upload local media",
+        type=["mp3", "wav", "m4a", "mp4", "mov", "mkv", "webm"],
+        help="Best fallback when YouTube returns HTTP 403 on cloud deployment.",
+    )
 
     language = st.selectbox("Language", ["english", "hinglish"], index=0)
 
@@ -362,8 +369,18 @@ st.markdown("---")
 
 # ── Run Pipeline ────────────────────────────────────────────────────────────────
 if run_btn:
-    if not source.strip():
-        st.error("Please enter a YouTube URL or file path.")
+    source_to_process = source.strip()
+    temp_path = None
+
+    if uploaded_file is not None:
+        suffix = os.path.splitext(uploaded_file.name)[1] or ".bin"
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp.write(uploaded_file.getbuffer())
+            temp_path = tmp.name
+        source_to_process = temp_path
+
+    if not source_to_process:
+        st.error("Please enter a YouTube URL or upload a local audio/video file.")
     else:
         st.session_state.pipeline_done = False
         st.session_state.result = None
@@ -380,7 +397,7 @@ if run_btn:
                 st.info("⚙️ Pipeline running — see sidebar for live status…")
 
             update_step("audio", "active")
-            chunks = process_input(source)
+            chunks = process_input(source_to_process)
             update_step("audio", "done")
 
             update_step("transcript", "active")
@@ -424,7 +441,17 @@ if run_btn:
             for k in ["audio","transcript","title","summary","extract","rag"]:
                 if st.session_state.pipeline_steps.get(k) == "active":
                     st.session_state.pipeline_steps[k] = "pending"
-            progress_placeholder.error(f"❌ Error: {e}")
+            message = str(e)
+            if "HTTP Error 403" in message or "YouTube blocked this request" in message:
+                progress_placeholder.error(
+                    "❌ YouTube denied access (HTTP 403) in this environment. "
+                    "Please upload the audio/video file directly using the uploader in the sidebar."
+                )
+            else:
+                progress_placeholder.error(f"❌ Error: {message}")
+        finally:
+            if temp_path and os.path.exists(temp_path):
+                os.remove(temp_path)
 
 # ── Results ──────────────────────────────────────────────────────────────────────
 if st.session_state.result:
