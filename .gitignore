@@ -1,1 +1,22 @@
 .env
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+venv/
+.venv/
+
+# Local/generated media and outputs
+downloades/
+*.wav
+*.mp3
+*.m4a
+
+# Local vector database
+vector_db/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db

@@ -1,0 +1,38 @@
+# Streamlit Cloud compatibility note:
+# Keep this file and duplicate to lowercase requirements.txt for cloud builders.
+
+# Core app
+streamlit>=1.35.0
+python-dotenv>=1.0.0
+requests>=2.32.0
+numpy>=1.26.0
+tqdm>=4.66.0
+
+# Audio / transcription
+yt-dlp>=2024.4.9
+pydub>=0.25.1
+openai-whisper>=20231117
+
+# RAG / LLM
+langchain>=0.2.0
+langchain-core>=0.2.0
+langchain-community>=0.2.0
+langchain-mistralai>=0.1.0
+mistralai>=0.4.0
+chromadb>=0.5.0
+sentence-transformers>=3.0.0
+langchain-huggingface>=0.0.3
+huggingface-hub>=0.23.0
+tiktoken>=0.7.0
+
+# Optional UI extras
+streamlit-extras>=0.4.0
+watchdog>=4.0.0
+
+# Export helpers
+reportlab>=4.2.0
+fpdf2>=2.7.9
+
+# Torch CPU wheels are resolved automatically by pip on Streamlit Cloud.
+torch>=2.2.0
+torchaudio>=2.2.0
