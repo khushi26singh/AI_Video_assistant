@@ -134,8 +134,24 @@ def download_youtube_audio(url :str) ->str:
             }
         ],
         "quiet": True,
+        "no_warnings": True,
         "noplaylist": True,
-        "extractor_args": {"youtube": {"player_client": ["web", "android"]}},
+        "retries": 3,
+        "fragment_retries": 3,
+        "socket_timeout": 20,
+        "http_headers": {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/126.0.0.0 Safari/537.36"
+            ),
+            "Accept-Language": "en-US,en;q=0.9",
+        },
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["android", "web", "tv_embedded"],
+            }
+        },
     }
     if ffmpeg_dir:
         ydl_opts["ffmpeg_location"] = ffmpeg_dir
@@ -163,8 +179,15 @@ def download_youtube_audio(url :str) ->str:
             "This usually means the video is private, blocked, or YouTube rejected the request."
         )
     except yt_dlp.utils.DownloadError as exc:
+        error_text = str(exc)
+        if "HTTP Error 403" in error_text or "Forbidden" in error_text:
+            raise RuntimeError(
+                "YouTube blocked this request (HTTP 403) from the current environment. "
+                "Try a different public video or download the media locally and upload/process the local file instead."
+            ) from exc
+
         raise RuntimeError(
-            f"Unable to download video data from YouTube: {exc}. "
+            f"Unable to download video data from YouTube: {error_text}. "
             "The video may be restricted, private, or blocked for this environment."
         ) from exc
 
